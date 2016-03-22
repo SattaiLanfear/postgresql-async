@@ -17,7 +17,8 @@
 package com.github.mauricio.async.db.pool
 
 import com.github.mauricio.async.db.util.ExecutorServiceUtils
-import com.github.mauricio.async.db.{QueryResult, Connection}
+import com.github.mauricio.async.db.{Connection, QueryResult}
+
 import scala.concurrent.{ExecutionContext, Future}
 
 /**
@@ -42,7 +43,7 @@ class ConnectionPool[T <: Connection](
                       executionContext: ExecutionContext = ExecutorServiceUtils.CachedExecutionContext
                       )
   extends SingleThreadedAsyncObjectPool[T](factory, configuration)
-  with Connection {
+  with PooledConnection {
 
   /**
    *
@@ -108,4 +109,27 @@ class ConnectionPool[T <: Connection](
   override def inTransaction[A](f : Connection => Future[A])(implicit context : ExecutionContext = executionContext) : Future[A] =
     this.use(_.inTransaction[A](f)(context))(executionContext)
 
+  /**
+   * Returns an object taken from the pool back to it. This object will become available for another client to use.
+   * If the object is invalid or can not be reused for some reason the [[scala.concurrent.Future]] returned will contain
+   * the error that prevented this object of being added back to the pool. The object is then discarded from the pool.
+   *
+   * @param connection
+   * @return
+   */
+  // This version exists purely
+  override def giveBack(connection: Connection): Future[ConnectionPool[T]] =
+    super.giveBack(connection.asInstanceOf[T]).mapTo[ConnectionPool[T]]
+
+  // Satisfies PooledConnection and refines close's return type
+  override def close: Future[ConnectionPool[T]] = super.close.mapTo[ConnectionPool[T]]
+
+  /**
+   *
+   * Retrieve and use an object from the pool for a single computation, returning it when the operation completes.
+   *
+   * @param f function that uses the connection
+   * @return f wrapped with take and giveBack
+   */
+  override def useConnection[A](f: (Connection) => Future[A])(implicit executionContext: ExecutionContext): Future[A] = use(f)
 }
